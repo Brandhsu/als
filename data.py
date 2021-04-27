@@ -13,7 +13,6 @@ class Dataset():
         self.train_size = train_size
         self.data = self.get_data()
         self.extract_data()
-        self.split_data()
         
         self.l1 = 'classification'
         self.l2 = 'reconstruction'
@@ -47,21 +46,25 @@ class Dataset():
         y = np.concatenate((self.ytr, self.yte))
         return x, y
     
+    def squeeze(self, x):
+        return x.squeeze() if len(x.shape) != 2 else x
+    
     def class_weights(self):
         neg, true = compute_class_weight(class_weight='balanced', classes=np.unique(self.ytr), y=self.ytr)
         return {0: neg, 1: true}  
     
     def feature_selection(self, percentile=10, mode='default'):
         np.random.seed(0)
-        if mode == 'chi': score_func = chi2
-        elif mode == 'mutual_info': score_func = mi
-        else: print('{} not in {{chi, mutual_info}} so using default features'.format(mode)); return;
+        self.features = self.squeeze(self.features)
         
-        x, y = self.combine_data()
-        if len(x.shape) != 2: x = x.squeeze();
-        self.features = SelectPercentile(score_func, percentile=percentile).fit_transform(x, y)
+        if mode == 'chi': 
+            self.features = SelectPercentile(chi2, percentile=percentile).fit_transform(self.features, self.labels)
+        elif mode == 'mutual_info': 
+            self.features = SelectPercentile(mi, percentile=percentile).fit_transform(self.features, self.labels)
+        else: 
+            print('{} not in {{chi, mutual_info}} so using default features'.format(mode))
+            
         self.features = np.expand_dims(self.features, axis=1)
-        self.labels = y
         self.split_data()
     
     def chi(self, x, y):
