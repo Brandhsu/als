@@ -5,6 +5,7 @@ from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 from sklearn.feature_selection import SelectPercentile, chi2, mutual_info_classif as mi
+from sklearn.preprocessing import normalize
 
 from tensorflow.keras import Input
 
@@ -21,9 +22,15 @@ class Dataset():
 
     def get_data(self):
         return pd.read_csv(self.path)
+
+    def normalize(self):
+        return np.expand_dims(normalize(self.squeeze(self.features_)), axis=1)
     
     def set_input(self):
         self.Input = Input(shape=self.features.shape[-2:])
+        
+    def set_data(self, dataset):
+        self.xtr, self.xte, self.ytr, self.yte = dataset
     
     def extract_data(self):
         pid = self.data.columns[0]
@@ -58,10 +65,11 @@ class Dataset():
         neg, true = compute_class_weight(class_weight='balanced', classes=np.unique(self.ytr), y=self.ytr)
         return {0: neg, 1: true}  
     
-    def feature_selection(self, percentile=10, mode='no'):
+    def feature_selection(self, norm=True, percentile=20, mode='no'):
         np.random.seed(0)
-        self.features = self.squeeze(self.features_)
-        print('Using {} feature selection'.format(mode))
+        
+        self.features = self.squeeze(self.normalize()) if norm else self.squeeze(self.features_)
+        print('Using {} feature selection and data normalization = {}'.format(mode, norm))
         
         if mode == 'chi': 
             self.features = SelectPercentile(chi2, percentile=percentile).fit_transform(self.features, self.labels)
@@ -72,15 +80,13 @@ class Dataset():
         self.split_data()
     
     def chi(self, x, y):
-        if len(x.shape) != 2: x = x.squeeze();
-        return chi2(x, y)
+        return chi2(self.squeeze(x), y)
     
     def mutual_info(self, x, y, n=3):
-        if len(x.shape) != 2: x = x.squeeze();
-        return mi(x, y, n_neighbors=n, random_state=0) 
+        return mi(self.squeeze(x), y, n_neighbors=n, random_state=0) 
     
     def pca(self, n_components=None, verbose=False):
-        pca = PCA(n_components).fit(self.features.squeeze())
+        pca = PCA(n_components).fit(self.squeeze(self.features))
         if verbose:
             plt.plot(np.cumsum(pca.explained_variance_ratio_))
             plt.xlabel('number of components')
