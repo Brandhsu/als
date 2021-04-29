@@ -19,7 +19,7 @@ This is done in a couple of steps:
 4. Learn the most important features for each cluster
 
 Visualization of steps
-![alt text](https://github.com/Brandhsu/als/assets/architecture.jpg)
+![alt text](https://github.com/Brandhsu/als/blob/master/assets/architecture.jpg)
 
 ## File Structure
 * als_notebook.ipynb includes an autoencoder neural network and some ML/Stats stuff at the bottom
