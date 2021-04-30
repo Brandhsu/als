@@ -21,37 +21,35 @@ def decoder(x, features):
 def network(dataset):
     x = dataset.Input
     input_size = x.shape[-1]
-    features = [128, 64]
+    features = [64]
     embed_size = 32
-    features = [1024, 128]
-    embed_size = 32
-    outputs = {}
     
     x_ = encoder(x, features)
     embedding = mlp(x_, embed_size)
     x_ = decoder(embedding, features)
 
-    classification = conv(embedding, 1, name=dataset.l1)
-    # reconstruction = conv(x_, input_size, name=dataset.l2)
-    name_me = layers.Lambda(lambda x: x, name=dataset.l2)
+    name_me = layers.Lambda(lambda x: x, name=dataset.losses[-1])
     reconstruction = layers.ReLU()(conv(x_, input_size))
-    reconstruction = name_me(reconstruction)
     
-    outputs[dataset.l1] = classification
-    outputs[dataset.l2] = reconstruction
+    outputs = {dataset.losses[i]: conv(embedding, 1, name=dataset.losses[i]) for i in range(len(dataset.losses)-1)}
+    outputs[dataset.losses[-1]] = name_me(reconstruction)
     
     return Model(x, outputs)
     
     
 # --- Model Compile
 def compile_(model, dataset, lr=1e-2):
+    # --- Define losses and metrics
+    loss = {dataset.losses[i]: BCE() for i in range(len(dataset.losses)-1)}
+    loss[dataset.losses[-1]] = WMSE()
+    metrics = {dataset.losses[i]: ['accuracy', tf.keras.metrics.AUC()] for i in range(len(dataset.losses)-1)}
+    metrics[dataset.losses[-1]] = 'mean_absolute_error'
+    
     model.compile(
         optimizer=optimizers.Adam(learning_rate=lr), 
-        # loss={dataset.l1: losses.SparseCategoricalCrossentropy(from_logits=True),
-        loss={dataset.l1: BCE(),
-              dataset.l2: WMSE()}, 
-        metrics={dataset.l1: ['accuracy', tf.keras.metrics.AUC()],
-                 dataset.l2: 'mean_absolute_error'},
+        # loss={dataset.losses[0]: losses.SparseCategoricalCrossentropy(from_logits=True),
+        loss=loss, 
+        metrics=metrics,
         experimental_run_tf_function=False)
 
     return model

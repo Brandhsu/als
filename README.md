@@ -21,8 +21,11 @@ This is done in a couple of steps:
 Visualization of steps
 ![alt text](https://github.com/Brandhsu/als/assets/architecture.jpg)
 
-## File Structure
+## Notes
 * als_notebook.ipynb includes an autoencoder neural network and some ML/Stats stuff at the bottom
+* models trained with small amt. of data and many parameters struggle to learn even on train-set
+    * this is suspected to be due to the "curse of dimensionality" and nonconvexity
+    * model has too many solutions and thus struggles to find the optimal parameters
 
 ## Implemented
 * Data loading (DESeq2)

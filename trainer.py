@@ -3,23 +3,24 @@ import tensorflow as tf
 from sklearn.model_selection import StratifiedKFold
 
 from op import *
-from model import *
+from ae import *
 from metrics import *
 np.set_printoptions(precision=3)
 
 
 def summarize(model, dataset):
-    print('=========TRAIN=========')
-    evaluate(model, dataset.xtr, dataset.ytr)
-    
-    print('=========VALID=========')
-    evaluate(model, dataset.xte, dataset.yte)
+    for i in range(len(dataset.losses)-1):
+        print('=========TRAIN=========')
+        evaluate(model, dataset.xtr, dataset.ytr[:, i], i)
+
+        print('=========VALID=========')
+        evaluate(model, dataset.xte, dataset.yte[:, i], i)
 
 
-def evaluate(model, x, y):
+def evaluate(model, x, y, class_id=0):
     logits = model.predict(x)
 
-    if type(logits) == list: logits = logits[0];
+    if type(logits) == list: logits = logits[class_id];
     if logits.shape[-1] == 1: 
         conf_scores = sigmoid(logits.squeeze())
         preds = 1*(logits.squeeze() > 0.5)
@@ -39,14 +40,14 @@ def evaluate(model, x, y):
 def train(dataset, batch_size, epochs):
     model = model_init(dataset)
     tf.random.set_seed(0)
-    outputs = {}
-    outputs[dataset.l1] = dataset.ytr
-    outputs[dataset.l2] = dataset.xtr
-    class_weights = {dataset.l1: dataset.weights}
+    # must have at least two classification losses
+    outputs = {dataset.losses[i]: dataset.ytr[:, i] for i in range(len(dataset.losses)-1)}
+    outputs[dataset.losses[-1]] = dataset.xtr
+    class_weights = {dataset.losses[i]: dataset.class_weights(i) for i in range(len(dataset.losses)-1)}
     
     validation = {}
-    validation[dataset.l1] = dataset.yte
-    validation[dataset.l2] = dataset.xte
+    validation[dataset.losses[0]] = dataset.yte
+    validation[dataset.losses[-1]] = dataset.xte
     
     history = model.fit(
         x=dataset.xtr,
