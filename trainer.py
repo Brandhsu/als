@@ -43,7 +43,7 @@ def train(dataset, batch_size, epochs):
     # must have at least two classification losses
     outputs = {dataset.losses[i]: dataset.ytr[:, i] for i in range(len(dataset.losses)-1)}
     outputs[dataset.losses[-1]] = dataset.xtr
-    class_weights = {dataset.losses[i]: dataset.class_weights(i) for i in range(len(dataset.losses)-1)}
+    class_weights = {dataset.losses[i]: dataset.weights[i] for i in range(len(dataset.losses)-1)}
     
     validation = {}
     validation[dataset.losses[0]] = dataset.yte

@@ -26,6 +26,8 @@ Visualization of steps
 * models trained with small amt. of data and many parameters struggle to learn even on train-set
     * this is suspected to be due to the "curse of dimensionality" and nonconvexity
     * model has too many solutions and thus struggles to find the optimal parameters
+* **NEW NOTEBOOK** experimental.ipynb includes the smaller model that performs much better
+    * notebook comes with an example to load data, train, save results, and visualize features
 
 ## Implemented
 * Data loading (DESeq2)

@@ -1,6 +1,7 @@
 import pandas as pd 
 import numpy as np
 from numpy import nan
+import pickle as pkl
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 from sklearn.model_selection import train_test_split
@@ -18,7 +19,25 @@ def invert_labels(col):
 
 def query_columns(df, query='_Classifier'):
     return [col for col in df.columns if query in col]
+
+def save(obj, path='./DESeq2.pkl'): 
+    with open(path, 'wb') as f:
+        state  = obj.__dict__.copy()
+        del state['Input']
+        pkl.dump(state, f, pkl.DEFAULT_PROTOCOL, fix_imports=False)
+            
+def load(path='./DESeq2.pkl'):
+    with open(path, 'rb') as f:
+        return pkl.load(f, fix_imports=False)
     
+def pca(dataset, n_components=None, verbose=False):
+    pca = PCA(n_components).fit(dataset.features)
+    if verbose:
+        plt.plot(np.cumsum(pca.explained_variance_ratio_))
+        plt.xlabel('number of components')
+        plt.ylabel('cumulative explained variance')
+    return pca
+
     
 class Dataset():
     def __init__(self, path, train_size=0.7):
@@ -32,7 +51,7 @@ class Dataset():
     def organize_data(self):
         if type(self.path) == list:
             self.transcriptomics_data(self.path)
-            self.losses = list(self.label_names.keys()) + ['reconstruction']
+            self.losses = list(self.label_dict.keys()) + ['reconstruction']
         else:     
             self.data = self.get_data()
             self.extract_data()
@@ -54,13 +73,13 @@ class Dataset():
                            'ALSFRS_Class_Median': 'Median_Classifier'})
 
         df = df.fillna(0)
-        self.label_names = {classifier: df[classifier] for classifier in query_columns(df)}
-        self.labels = np.column_stack([v for k, v in self.label_names.items()])
+        self.label_dict = {classifier: df[classifier] for classifier in query_columns(df)}
+        self.labels = np.column_stack([v for k, v in self.label_dict.items()])
         
         # Should refactor
         self.data = df
         pid = self.data.columns[0]
-        lbls = [lbl for lbl in self.label_names.keys()]
+        lbls = [lbl for lbl in self.label_dict.keys()]
         data = self.data.drop([pid], axis=1)
         data = data.drop(lbls, axis=1)
         self.features_ = np.expand_dims(data, axis=1)
@@ -74,7 +93,9 @@ class Dataset():
         self.Input = Input(shape=self.features.shape[-2:])
         
     def set_data(self, dataset):
+        # used only in cross validation
         self.xtr, self.xte, self.ytr, self.yte = dataset
+        self.weights = {i: self.set_class_weights(i) for i in range(len(self.losses)-1)}
     
     def extract_data(self):
         pid = self.data.columns[0]
@@ -96,6 +117,7 @@ class Dataset():
                                    random_state=0)
         
         self.xtr, self.xte, self.ytr, self.yte, self.ptr, self.pte = dataset
+        self.weights = {i: self.set_class_weights(i) for i in range(len(self.losses)-1)}
         
     def combine_data(self):
         x = np.concatenate((self.xtr, self.xte))
@@ -105,12 +127,12 @@ class Dataset():
     def squeeze(self, x):
         return x.squeeze() if len(x.shape) != 2 else x
     
-    def class_weights(self, class_id=0):
+    def set_class_weights(self, class_id=0):
         if len(self.ytr.shape) == 1:
             neg, true = compute_class_weight(class_weight='balanced', classes=np.unique(self.ytr), y=self.ytr)
         else:
             neg, true = compute_class_weight(class_weight='balanced', classes=np.unique(self.ytr[:, class_id]), y=self.ytr[:, class_id])
-        return {0: neg, 1: true}  
+        return {0: neg, 1: true}
     
     def feature_selection(self, norm=True, percentile=20, mode='no'):
         np.random.seed(0)
@@ -131,11 +153,3 @@ class Dataset():
     
     def mutual_info(self, x, y, n=3):
         return mi(self.squeeze(x), y, n_neighbors=n, random_state=0) 
-    
-    def pca(self, n_components=None, verbose=False):
-        pca = PCA(n_components).fit(self.squeeze(self.features))
-        if verbose:
-            plt.plot(np.cumsum(pca.explained_variance_ratio_))
-            plt.xlabel('number of components')
-            plt.ylabel('cumulative explained variance')
-        self.pca_ = pca
