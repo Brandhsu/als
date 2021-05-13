@@ -38,7 +38,7 @@ def pca_importance(dataset, pca_):
     
     df = {'pc-{}'.format(i+1): largest_components_names[i] for i in range(n_components)}
     
-    return pd.DataFrame(df.items(), columns=['pc', 'feature'])
+    return pd.DataFrame(df.items(), columns=['pc', 'feature']), largest_component # returning dataframe and component indices
 
 
 # https://www.kaggle.com/aviv10/als-meaningful-clusters-and-feature-extraction#Functions

@@ -6,55 +6,20 @@ from tensorflow.keras import Input, Model, models, layers, losses, optimizers
 
 from data import Dataset
 
-def load_data(csv=['./data/ctrl_vs_case.csv', './data/bulbar_vs_limb.csv', './data/median_low_vs_high.csv'], norm=True, feat_select=True, **kwargs):
-    
-    np.random.seed(0)
-    dataset = Dataset(csv, train_size=0.7)
-    dataset.features = dataset.features_.squeeze()
-    
-    y = dataset.labels
-    X = dataset.features
-    
-    # --- Remove empty columns
-    indices = X.any(axis=0)
-    X = X[:, indices]
-    dataset.feature_names_ = dataset.feature_names_[indices]
+def inference(model, x, class_id=0):
+    pred = model.predict(x)
+    return pred if len(pred) == x.shape[0] else model.predict(x)[class_id]
 
-    # --- Normalize X by column to [0, 1]
-    if norm:
-        X = X - np.min(X, axis=0, keepdims=True)
-        X = X / np.max(X, axis=0, keepdims=True)
-    
-    dataset.features = X
-    
-    if feat_select:
-        dataset.feature_names_, dataset.features = select_features(dataset, X, y[:, 0], **kwargs)
-        
-    dataset.split_data()
-
-    return dataset
-
-def select_features(dataset, X, y, top_percent=0.01, random_state=0):
-    """
-    Method to select top N features
-
-    """
-    mi = feature_selection.mutual_info_classif(X, y, random_state=random_state)
-
-    # --- Find indices of top N features
-    indices = np.argsort(mi)[::-1][:int(X.shape[-1] * top_percent)]
-
-    return dataset.feature_names_[indices], X[:, indices]
-
-def inference(model, x, class_id):
-    return model.predict(x)[class_id][:, -1]
-    
+def acc(pred, y):
+    pred = np.argmax(pred, axis=-1)
+    print('acc     score: {}'.format(sum(pred == y) / len(y)))
+          
 def roc_auc(pred, y):
-    fpr, tpr, thresholds = metrics.roc_curve(y, pred)
+    fpr, tpr, thresholds = metrics.roc_curve(y, pred[:, -1])
     print('roc_auc score: {}'.format(metrics.auc(fpr, tpr)))
     
 def prc_auc(pred, y):
-    precision, recall, _ = metrics.precision_recall_curve(y, pred)
+    precision, recall, _ = metrics.precision_recall_curve(y, pred[:, -1])
     print('prc_auc score: {}'.format(metrics.auc(recall, precision)))
     
 def load_model(path='./model.hdf5'):
@@ -70,27 +35,15 @@ def create_model(dataset, shape, lr, drop=0.5):
 
     x = Input(shape=shape)
 
-    l0 = layers.Dense(64, activation='relu')(layers.BatchNormalization()(layers.Dropout(drop)(x)))
-    l1 = layers.Dense(64, activation='relu')(layers.BatchNormalization()(layers.Dropout(drop)(l0)))
+    l0 = layers.Dense(64, activation='relu')(layers.Dropout(drop)(x))
+    l1 = layers.Dense(64, activation='relu', name='latent_feature')(layers.Dropout(drop)(l0))
     
-    # added remove if bad
-    l2 = layers.Dense(64, activation='relu')(layers.BatchNormalization()(layers.Dropout(drop)(l1)))
-    l3 = layers.Dense(64, activation='relu')(layers.BatchNormalization()(layers.Dropout(drop)(l2)))
-    l4 = layers.Dense(x.shape[-1], name='reconstruction')(layers.Dropout(drop)(l3))
-
-    logits = {dataset.losses[i]: layers.Dense(2, name=dataset.losses[i])(layers.Dropout(drop)(l1)) for i in range(len(dataset.losses)-1)}
-    
-    # added remove if bad
-    logits[dataset.losses[-1]] = l4
-
+    logits = {dataset.losses[i]: layers.Dense(2, name=dataset.losses[i])(layers.Dropout(drop)(l1)) for i in range(len(dataset.losses)-1)}       
+   
     model = Model(inputs=x, outputs=logits)
     
     loss = {dataset.losses[i]: losses.SparseCategoricalCrossentropy(from_logits=True) for i in range(len(dataset.losses)-1)}
     metrics = {dataset.losses[i]: ['sparse_categorical_accuracy'] for i in range(len(dataset.losses)-1)}
-           
-    # added remove if bad
-    loss[dataset.losses[-1]] = losses.MAE
-    metrics[dataset.losses[-1]] = ['mean_absolute_error']
 
     model.compile(
         optimizer=optimizers.Adam(learning_rate=lr),
@@ -99,25 +52,30 @@ def create_model(dataset, shape, lr, drop=0.5):
 
     return model
 
-def train_model(dataset, lr, batch_size, epochs):
+def train_model(dataset, lr, batch_size, epochs, drop, verbose):
     
     # --- Create model
     tf.random.set_seed(0)
-    model = create_model(dataset, dataset.xtr.shape[1:], lr)
+    model = create_model(dataset, dataset.xtr.shape[1:], lr, drop)
 
     # --- Find train/valid cohort split
     X_train = dataset.xtr
     X_valid = dataset.xte
     
     # --- Identify tasks
-    y_train = {dataset.losses[i]: dataset.ytr[:, i] for i in range(len(dataset.losses)-1)}
-    y_train[dataset.losses[-1]] = X_train
-    y_valid = {dataset.losses[i]: dataset.yte[:, i] for i in range(len(dataset.losses)-1)}
-    y_valid[dataset.losses[-1]] = X_valid
+    try:
+        y_train = {dataset.losses[i]: dataset.ytr[:, i] for i in range(len(dataset.losses)-1)}
+        y_valid = {dataset.losses[i]: dataset.yte[:, i] for i in range(len(dataset.losses)-1)}
+    except:
+        y_train = {dataset.losses[i]: dataset.ytr for i in range(len(dataset.losses)-1)}
+        y_valid = {dataset.losses[i]: dataset.yte for i in range(len(dataset.losses)-1)}
     
     # --- Add class weights to each task
-    class_weights = {dataset.losses[i]: dataset.weights[i] for i in range(len(dataset.losses)-1)}
-
+    try:
+        class_weights = {dataset.losses[i]: dataset.weights[i] for i in range(dataset.start, len(dataset.losses)-1)}
+    except:
+        class_weights = dataset.weights[0]
+    
     history = model.fit(
         x=X_train, 
         y=y_train,
@@ -125,43 +83,63 @@ def train_model(dataset, lr, batch_size, epochs):
         batch_size=batch_size,
         class_weight=class_weights,
         epochs=epochs,
-        use_multiprocessing=False,) 
-        #verbose=0)
+        use_multiprocessing=False,
+        verbose=verbose)
 
     for i in range(len(dataset.losses)-1):
         print(dataset.losses[i])
+        print('--- Training Results')
+        acc(inference(model, X_train, i), y_train[dataset.losses[i]])
         roc_auc(inference(model, X_train, i), y_train[dataset.losses[i]])
         prc_auc(inference(model, X_train, i), y_train[dataset.losses[i]])
+        print('--- Validation Results')
+        acc(inference(model, X_valid, i), y_valid[dataset.losses[i]])
         roc_auc(inference(model, X_valid, i), y_valid[dataset.losses[i]])
         prc_auc(inference(model, X_valid, i), y_valid[dataset.losses[i]])
     
     return history, model
 
-def cross_valid(dataset, lr, batch_size, epochs, n_folds=5):
+def cross_valid(dataset, lr, batch_size, epochs, drop, verbose, n_folds=5):
     X = dataset.features
     y = dataset.labels
     kf = StratifiedKFold(n_splits=n_folds)
     histories = []
+    fold = 1
+    
+    try:
+        z = y[:, 0]
+    except:
+        z = y
 
-    for train_index, test_index in kf.split(X, y[:, 0]):
-        xtr, xte = X[train_index], X[test_index]
-        ytr, yte = y[train_index], y[test_index]
-        data = (xtr, xte, ytr, yte)
-        dataset.set_data(data)
-        history, model = train_model(dataset, lr, batch_size, epochs)
+    for train_index, test_index in kf.split(X, z):
+        print(f'--- Fold {fold}')
+        dataset.cross_valid_split_data(train_index, test_index)
+        history, model = train_model(dataset, lr, batch_size, epochs, drop, verbose)
         histories.append(history)
+        
+        # --- Get latent features
+        network = Model(inputs=model.inputs,
+                        outputs=model.get_layer(name='latent_feature').output,)
+            
+        lf = network.predict(dataset.xte)
+        
+        # --- Store to dataframe
+        dataset.to_dataframe(lf, fold)
+        fold += 1
+        
+    dataset.to_dataframe(lf, fold, save=True)
         
     return histories, model
 
 
-def learn(dataset, lr, batch_size, epochs, n_folds):
+def learn(dataset, lr, batch_size, epochs, drop, n_folds, verbose):
     if n_folds < 2:
-        return train_model(dataset, lr, batch_size, epochs)
+        return train_model(dataset, lr, batch_size, epochs, drop, verbose)
     else:
-        return cross_valid(dataset, lr, batch_size, epochs, n_folds)
+        return cross_valid(dataset, lr, batch_size, epochs, drop, verbose, n_folds)
     
 # ======================================================================
 if __name__ == '__main__':
     dataset = load_data()
-    learn(dataset, lr=1e-3, batch_size=32, epochs=100, n_folds=1)
+    learn(dataset, lr=1e-3, batch_size=32, epochs=100, drop=0.5, n_folds=1)
 # ======================================================================
